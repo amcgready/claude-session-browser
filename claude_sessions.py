@@ -259,8 +259,8 @@ DEFAULT_SETTINGS = {
     "projects_dir": "",          # leer = automatisch suchen
     "accent": "#ec7456",         # Akzentfarbe der Oberflaeche (Koralle, passend zum Logo)
     "bg_base": "#4a3a30",        # Grundton -> daraus wird die Hintergrund-Palette abgeleitet (warm)
-    "language": "auto",          # auto (= Windows-Sprache) | de | en
-    "terminal": "auto",          # auto | wt | cmd
+    "language": "auto",          # auto (= system language) | de | en
+    "terminal": "auto",          # auto | wt (Windows) | cmd (Windows) | terminal (macOS)
     "claude_cmd": "claude",      # Befehl/Pfad zur Claude-CLI
     "columns": [                 # sichtbare Spalten + Reihenfolge
         {"key": "title", "on": True}, {"key": "project", "on": True},
@@ -270,10 +270,10 @@ DEFAULT_SETTINGS = {
     "win_w": 0, "win_h": 0,      # gemerkte Fenstergroesse (0 = noch nicht gesetzt)
     "win_x": None, "win_y": None,  # gemerkte Position
     "win_max": False,            # war das Fenster maximiert?
-    "close_to_tray": True,       # X = App verstecken (Tray-Icon) statt beenden
-    "autostart": True,           # Beim Windows-Start automatisch mitstarten
-    "autostart_registered": False,  # Merker: Registry-Eintrag beim ersten Mal setzen
-    "notify_limit_reset": True,  # Windows-Notification wenn Claude-Limit sich zurueckgesetzt hat
+    "close_to_tray": True if _IS_WIN else False,  # X = App verstecken (Tray-Icon) statt beenden (Windows only)
+    "autostart": True if _IS_WIN else False,  # Beim Windows-Start automatisch mitstarten (Windows only)
+    "autostart_registered": False,  # Merker: Registry-Eintrag beim ersten Mal setzen (Windows only)
+    "notify_limit_reset": True,  # Notification wenn Claude-Limit sich zurueckgesetzt hat
     "limit_reset_at": 0,         # Epoche wann Limit zurueckgesetzt wird (aus JSONL geparst, 0 = unbekannt)
     "limit_reset_notified_for": 0,  # Fuer welche limit_reset_at wurde schon benachrichtigt (verhindert Doppel-Feuer)
     "notify_limit_near": True,   # Warnen bevor das 5h-Limit voll ist
@@ -1036,6 +1036,32 @@ def _safe_workdir(cwd, project=""):
     return dec if dec and os.path.isdir(dec) else HOME
 
 
+def _open_terminal_mac(workdir, claude_cmd, session_id, env):
+    """Open macOS Terminal.app with a new window running claude --resume"""
+    script = f'cd "{workdir}" && CLAUDE_CODE_FORCE_SESSION_PERSIST=1 {claude_cmd} --resume {session_id}'
+    apple_script = f'''
+tell application "Terminal"
+    activate
+    set newWindow to do shell script "{script}"
+    tell application "System Events" to keystroke "n" using command down
+end tell
+'''
+    try:
+        subprocess.Popen(["osascript", "-e", apple_script], env=env)
+    except Exception:
+        # Fallback if AppleScript fails: try direct Terminal invocation
+        try:
+            subprocess.Popen(["open", "-a", "Terminal", workdir], env=env)
+            # Give Terminal time to open, then send the command
+            import time
+            time.sleep(0.5)
+            subprocess.Popen(["osascript", "-e",
+                f'tell application "Terminal" to do shell script "{claude_cmd} --resume {session_id}"'],
+                env=env)
+        except Exception:
+            pass
+
+
 def resume_session(session_id, cwd, settings, project=""):
     # Session-ID hart validieren – sie fliesst in eine Terminal-Kommandozeile.
     # Ein bloedes Zeichen (& | " `) waere sonst Command-Injection.
@@ -1055,21 +1081,27 @@ def resume_session(session_id, cwd, settings, project=""):
     env = os.environ.copy()
     env["CLAUDE_CODE_FORCE_SESSION_PERSIST"] = "1"
     try:
-        if term in ("auto", "wt"):
-            try:
-                # argv-Form, KEIN shell=True -> keine Shell-Interpretation
-                subprocess.Popen(["wt", "-d", workdir, "cmd", "/k",
-                                  claude, "--resume", sid], env=env)
-                return {"ok": True}
-            except FileNotFoundError:
-                if term == "wt":
-                    return {"ok": False, "error": t("Windows Terminal (wt) nicht gefunden.")}
-        # Fallback: cmd.exe direkt starten – ohne shell=True, argv als Liste.
-        # `start` ist ein cmd-Builtin, deshalb rufen wir cmd /c start …
-        subprocess.Popen(
-            ["cmd", "/c", "start", "Claude Code", "/D", workdir,
-             "cmd", "/k", claude, "--resume", sid], env=env)
-        return {"ok": True}
+        if _IS_MAC:
+            _open_terminal_mac(workdir, claude, sid, env)
+            return {"ok": True}
+        elif _IS_WIN:
+            if term in ("auto", "wt"):
+                try:
+                    # argv-Form, KEIN shell=True -> keine Shell-Interpretation
+                    subprocess.Popen(["wt", "-d", workdir, "cmd", "/k",
+                                      claude, "--resume", sid], env=env)
+                    return {"ok": True}
+                except FileNotFoundError:
+                    if term == "wt":
+                        return {"ok": False, "error": t("Windows Terminal (wt) nicht gefunden.")}
+            # Fallback: cmd.exe direkt starten – ohne shell=True, argv als Liste.
+            # `start` ist ein cmd-Builtin, deshalb rufen wir cmd /c start …
+            subprocess.Popen(
+                ["cmd", "/c", "start", "Claude Code", "/D", workdir,
+                 "cmd", "/k", claude, "--resume", sid], env=env)
+            return {"ok": True}
+        else:
+            return {"ok": False, "error": t("Unsupported platform")}
     except OSError as e:
         return {"ok": False, "error": str(e)}
 
@@ -1078,6 +1110,64 @@ def resume_session(session_id, cwd, settings, project=""):
 #  Buddy-Controller (Tkinter-Fenster in eigenem Daemon-Thread)
 # --------------------------------------------------------------------------- #
 _IS_WIN = sys.platform == "win32"
+_IS_MAC = sys.platform == "darwin"
+_IS_LINUX = sys.platform.startswith("linux")
+
+
+def _mac_enum_monitors():
+    """Get monitor information on macOS using Tkinter's screen geometry."""
+    try:
+        import tkinter as tk
+        root = tk.Tk()
+        root.withdraw()
+        monitors = []
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+        root.destroy()
+
+        monitors.append({
+            "idx": 0,
+            "left": 0,
+            "top": 0,
+            "right": screen_width,
+            "bottom": screen_height,
+            "primary": True,
+            "label": f"{t('Primär')} · {screen_width}×{screen_height}"
+        })
+        return monitors
+    except Exception:
+        return [{
+            "idx": 0,
+            "left": 0,
+            "top": 0,
+            "right": 1920,
+            "bottom": 1080,
+            "primary": True,
+            "label": f"{t('Primär')} · 1920×1080"
+        }]
+
+
+def _mac_list_windows_hwnd():
+    """Get list of open windows on macOS using AppleScript."""
+    try:
+        script = '''tell application "System Events"
+    set windowList to {}
+    tell process (name of first process whose frontmost is true)
+        repeat with w in (windows)
+            set end of windowList to name of w
+        end repeat
+    end tell
+    return windowList
+end tell'''
+        result = subprocess.check_output(["osascript", "-e", script], text=True).strip()
+        windows = []
+        for i, title in enumerate(result.split("\n")):
+            title = title.strip()
+            if title:
+                windows.append((i, title))
+        return windows
+    except Exception:
+        return []
 
 
 def _win_enum_monitors():
@@ -1085,6 +1175,8 @@ def _win_enum_monitors():
     Rueckgabe: [{'idx': 0, 'left': ..., 'top': ..., 'right': ..., 'bottom': ...,
     'primary': True/False, 'label': 'Primär 1920×1080'}]"""
     if not _IS_WIN:
+        if _IS_MAC:
+            return _mac_enum_monitors()
         return []
 
     class RECT(ctypes.Structure):
@@ -1134,6 +1226,11 @@ def _win_monitor_work_from_point(x, y):
     """Arbeitsbereich (ohne Taskleiste) des Monitors, auf dem Punkt (x,y)
     liegt. Rueckgabe: (left, top, right, bottom) oder None."""
     if not _IS_WIN:
+        if _IS_MAC:
+            mons = _mac_enum_monitors()
+            if mons:
+                m = mons[0]
+                return (m["left"], m["top"], m["right"], m["bottom"])
         return None
     try:
         u = ctypes.windll.user32
@@ -1226,8 +1323,15 @@ def _anchor_position(anchor, size_px, current_x, current_y, monitor_idx=None):
 
 
 def _win_foreground_title():
-    """Titel des aktuell fokussierten Fensters (nur Windows). Leerer String
+    """Titel des aktuell fokussierten Fensters (nur Windows/macOS). Leerer String
     wenn nicht ermittelbar."""
+    if _IS_MAC:
+        try:
+            script = 'tell application "System Events" to get name of (processes where frontmost is true)'
+            result = subprocess.check_output(["osascript", "-e", script], text=True).strip()
+            return result
+        except Exception:
+            return ""
     if not _IS_WIN:
         return ""
     try:
@@ -1505,6 +1609,8 @@ def _win_hwnd_process(hwnd):
 
 def _win_list_windows_hwnd():
     """Sichtbare Fenster als (hwnd, titel)-Liste, ungefiltert."""
+    if _IS_MAC:
+        return _mac_list_windows_hwnd()
     if not _IS_WIN:
         return []
     try:
@@ -6964,14 +7070,32 @@ def _acquire_single_instance():
 
 def _screen_w():
     try:
-        return int(ctypes.windll.user32.GetSystemMetrics(0)) if _IS_WIN else 1920
+        if _IS_WIN:
+            return int(ctypes.windll.user32.GetSystemMetrics(0))
+        elif _IS_MAC:
+            import tkinter as tk
+            root = tk.Tk()
+            root.withdraw()
+            w = root.winfo_screenwidth()
+            root.destroy()
+            return w
+        return 1920
     except Exception:
         return 1920
 
 
 def _screen_h():
     try:
-        return int(ctypes.windll.user32.GetSystemMetrics(1)) if _IS_WIN else 1080
+        if _IS_WIN:
+            return int(ctypes.windll.user32.GetSystemMetrics(1))
+        elif _IS_MAC:
+            import tkinter as tk
+            root = tk.Tk()
+            root.withdraw()
+            h = root.winfo_screenheight()
+            root.destroy()
+            return h
+        return 1080
     except Exception:
         return 1080
 
