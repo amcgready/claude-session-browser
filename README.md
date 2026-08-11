@@ -5,8 +5,9 @@
 # Claude Session Browser
 
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4)](https://github.com/juppeee/claude-session-browser/releases/latest)
+[![macOS](https://img.shields.io/badge/macOS-10.13+-000000)](MACOS_PORT_GUIDE.md)
 [![Python](https://img.shields.io/badge/Python-3.11-3776ab)](https://www.python.org/)
-[![UI](https://img.shields.io/badge/UI-pywebview%20%2B%20WebView2-ec7456)](https://pywebview.flowrl.com/)
+[![UI](https://img.shields.io/badge/UI-pywebview-ec7456)](https://pywebview.flowrl.com/)
 [![License](https://img.shields.io/badge/License-MIT-3ecf8e)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/juppeee/claude-session-browser?color=ffb454)](https://github.com/juppeee/claude-session-browser/releases/latest)
 
@@ -40,16 +41,17 @@ and puts you back into one with a double-click.
 - **Every session in one list** — Claude's auto-title or your own, folder, message count, last activity
 - **Find it fast** — live search across title, folder, ID and first question; sortable, configurable columns
 - **Make it yours** — colour-code sessions, rename them for good, copy the ID
-- **One click back in** — opens Windows Terminal or `cmd` with the session resumed
+- **One click back in** — opens Terminal.app (macOS) or Windows Terminal/`cmd` (Windows) with the session resumed
 - **Know where your quota stands** — 5-hour and weekly usage with a live countdown to the reset
 - **Get told, not surprised** — a heads-up before the limit is full, and a notification when it resets
 - **[Clawd](#clawd-your-desktop-buddy)** — a 20×20 pixel buddy on your desktop who acts out what Claude is doing
-- **[Clawdmeter](#clawdmeter) support** — mirror Clawd onto a real device over Bluetooth
-- **German and English**, following your Windows language
+- **[Clawdmeter](#clawdmeter) support** — mirror Clawd onto a real device over Bluetooth (Windows)
+- **German and English** language support
 - **Updates itself** from GitHub
 
 ## Quick start
 
+### Windows
 **[⬇ Download ClaudeSessionBrowser-Setup.exe](https://github.com/juppeee/claude-session-browser/releases/latest/download/ClaudeSessionBrowser-Setup.exe)** and run it. That's the whole installation.
 
 It installs per user, so **no admin rights and no UAC prompt**, and it never
@@ -60,27 +62,32 @@ business. The app starts by itself when the installer finishes.
 > because the app isn't code-signed. Click **More info → Run anyway**. It won't
 > ask again — the installed copy carries no "downloaded from the web" mark.
 
-<details>
-<summary><b>Run it from source instead</b></summary>
+### macOS
+For detailed setup instructions, see [MACOS_PORT_GUIDE.md](MACOS_PORT_GUIDE.md).
+
+Quick start:
+```bash
+pip install pywebview
+python3 claude_sessions.py
+```
+
+### Run from source (all platforms)
 
 ```bash
 git clone https://github.com/juppeee/claude-session-browser.git
 cd claude-session-browser
-pip install pywebview pystray Pillow
-python claude_sessions.py
+pip install pywebview
+python3 claude_sessions.py
 ```
 
-`pywebview` renders through the Edge WebView2 engine, which ships with Windows
-10 and 11. Bluetooth for the Clawdmeter needs one more package:
+**Windows only** — additional packages for tray icon and Clawdmeter:
 
 ```bash
-pip install bleak
+pip install pystray Pillow bleak
 ```
 
-</details>
-
 <details>
-<summary><b>Build your own installer</b></summary>
+<summary><b>Build your own installer (Windows)</b></summary>
 
 ```bash
 pip install pyinstaller
@@ -133,7 +140,7 @@ sessions you start afterwards.
 
 ## Clawdmeter
 
-*Optional, and someone else's project — skip this if you don't own the device.*
+*Optional, Windows only, and someone else's project — skip this if you don't own the device or aren't on Windows.*
 
 The [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) is a small ESP32
 device by [Hermann Björgvin](https://github.com/HermannBjorgvin) that displays
@@ -150,7 +157,7 @@ its battery level back, and warns you before it runs flat.
 
 </div>
 
-Pair the device once in the Windows Bluetooth settings, then enable it under
+**Windows:** Pair the device once in the Windows Bluetooth settings, then enable it under
 **Settings → Connections**.
 
 **Stock firmware is enough for most of it.** Usage and battery need nothing
@@ -178,14 +185,14 @@ See [Credits](#credits) for who built what.
 
 | Setting | Default | What it does |
 |---|---|---|
-| Language | Automatic | German on German Windows, English everywhere else |
-| Open with | Automatic | Windows Terminal, or `cmd` if that's missing |
+| Language | Automatic | German on German systems, English everywhere else |
+| Open with | Automatic | Terminal.app (macOS), Windows Terminal, or `cmd` (Windows) |
 | Claude command | `claude` | Path or name of the Claude CLI |
-| Keep running in background | On | The X button hides the app in the system tray |
-| Start with Windows | On | Registry entry under `HKCU\Run` |
-| Notify on limit reset | On | A Windows notification when your quota is back |
+| Keep running in background | On (Windows) / Off (macOS) | The X button hides the app in the system tray (Windows only) |
+| Start with Windows | On (Windows) / Off (macOS) | Registry entry under `HKCU\Run` (Windows only) |
+| Notify on limit reset | On | A notification when your quota is back |
 | Warn before the limit is full | On, at 90% | Once per 5-hour window |
-| Clawdmeter battery warning | On, at 15% | Once per discharge |
+| Clawdmeter battery warning | On, at 15% | Once per discharge (Windows only) |
 
 <details>
 <summary><b>Where your data lives</b></summary>
@@ -243,8 +250,13 @@ The app compares its own `VERSION` against `version.json` in this repo on start.
 The app checks GitHub for updates by itself and offers to install them. No
 internet, no problem — the check is skipped silently.
 
-To remove it: **Settings → Apps → Claude Session Browser → Uninstall**. Your
-sessions, titles and settings under `~/.claude` survive. Delete
+### Windows
+**Settings → Apps → Claude Session Browser → Uninstall**
+
+### macOS
+Delete the app from Applications folder, or use `pip uninstall` if installed via pip.
+
+**All platforms:** Your sessions, titles and settings under `~/.claude` survive. Delete
 `session_browser_settings.json` and `session_titles.json` by hand if you want
 those gone too.
 
